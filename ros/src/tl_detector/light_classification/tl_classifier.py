@@ -42,6 +42,9 @@ class TLClassifier(object):
             int: ID of traffic light color (specified in styx_msgs/TrafficLight)
         """
         #TODO implement light color prediction
+
+        traffic_light_color = TrafficLight.UNKNOWN
+
         with self.detection_graph.as_default():
             with tf.Session(graph=self.detection_graph) as sess:
                 # Definite input and output Tensors for detection_graph
@@ -62,7 +65,7 @@ class TLClassifier(object):
 
                 image_np = np.asarray(image)
                 rospy.loginfo(image_np.shape)
-                return TrafficLight.UNKNOWN
+                # return TrafficLight.UNKNOWN
 
                 # image_np = self.load_image_into_numpy_array(image)
                 # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
@@ -77,6 +80,9 @@ class TLClassifier(object):
 
                 time1 = time.time()
 
+                rospy.loginfo('------------------------------')
+                rospy.loginfo("Time in milliseconds: " + str((time1 - time0) * 1000))
+
                 boxes = np.squeeze(boxes)
                 scores = np.squeeze(scores)
                 classes = np.squeeze(classes).astype(np.int32)
@@ -85,23 +91,25 @@ class TLClassifier(object):
                 for i in range(boxes.shape[0]):
                     if scores is None or scores[i] > min_score_thresh:
                         class_name = self.category_index[classes[i]]['name']
-                        print('{}'.format(class_name), scores[i])
 
-                        fx = 0.97428
-                        fy = 1.73205
-                        perceived_width_x = (boxes[i][3] - boxes[i][1]) * 800
-                        perceived_width_y = (boxes[i][2] - boxes[i][0]) * 600
+                        if class_name == 'Red':
+                            if scores[i] >= 0.5:
+                                traffic_light_color = TrafficLight.RED
 
-                        # ymin, xmin, ymax, xmax = box
-                        # depth_prime = (width_real * focal) / perceived_width
-                        perceived_depth_x = ((.1 * fx) / perceived_width_x)
-                        perceived_depth_y = ((.3 * fy) / perceived_width_y)
+                        if class_name == 'Green':
+                            if scores[i] >= 0.5:
+                                traffic_light_color = TrafficLight.GREEN
 
-                        estimated_distance = round((perceived_depth_x + perceived_depth_y) / 2)
-                        print("Distance (metres)", estimated_distance)
-                        print("Time in milliseconds", (time1 - time0) * 1000, "\n")
+                        if class_name == 'Yellow':
+                            if scores[i] >= 0.5:
+                                traffic_light_color = TrafficLight.YELLOW
 
-        return TrafficLight.UNKNOWN
+                        if class_name == 'off':
+                                traffic_light_color = TrafficLight.UNKNOWN
+
+                        # rospy.loginfo('class name: ' + class_name + ", score: " + str(scores[i]))
+
+        return traffic_light_color
 
     # def load_image_into_numpy_array(self, image):
     #     (im_width, im_height) = image.size

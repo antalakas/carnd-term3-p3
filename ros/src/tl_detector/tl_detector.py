@@ -14,6 +14,7 @@ import math
 
 STATE_COUNT_THRESHOLD = 3
 TRAFFIC_LIGHT_DISTANCE_THRESHOLD = 100.0
+CHECK_CAMERA_EVERY_N_FRAMES = 10
 
 class TLDetector(object):
     def __init__(self):
@@ -95,7 +96,7 @@ class TLDetector(object):
         self.camera_image = msg
 
         # performs throttling emperically, otherwise PID fails due to high load
-        if self.images_received_counter < 5:
+        if self.images_received_counter < CHECK_CAMERA_EVERY_N_FRAMES:
             return
         else:
             self.images_received_counter = 0
@@ -197,13 +198,14 @@ class TLDetector(object):
 
         # rospy.loginfo('is closing to traffic light:' + str(self.is_closing))
 
-        if light is not None and self.is_closing is True:
-            rospy.loginfo('light position: ' + str(light.x) + ', '
-                          + str(light.y) + ', distance: ' + str(distance))
+        # if light is not None and self.is_closing is True:
+        #     rospy.loginfo('light position: ' + str(light.x) + ', '
+        #                   + str(light.y) + ', distance: ' + str(distance))
 
-        if light:
-            # state = self.get_light_state(the_light)
-            return light, TrafficLight.UNKNOWN
+        if light is not None and self.is_closing is True:
+            state = self.get_light_state(light)
+            rospy.loginfo('Traffic light recognized:' + str(state))
+            return -1, state
         self.waypoints = None
         return -1, TrafficLight.UNKNOWN
 
