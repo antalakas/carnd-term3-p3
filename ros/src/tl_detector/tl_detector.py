@@ -15,6 +15,7 @@ import math
 STATE_COUNT_THRESHOLD = 3
 TRAFFIC_LIGHT_DISTANCE_THRESHOLD = 100.0
 CHECK_CAMERA_EVERY_N_FRAMES = 10
+STOP_N_WAYPOINTS_BEFORE_TRAFFIC_LIGHT = 30
 
 class TLDetector(object):
     def __init__(self):
@@ -58,6 +59,9 @@ class TLDetector(object):
         self.images_received_counter = 0
         self.is_closing = False
 
+        self.min_dist_to_light = None
+        self.closest_light = None
+
         rospy.spin()
 
     def pose_cb(self, msg):
@@ -68,15 +72,35 @@ class TLDetector(object):
         self.pose = self.pose.pose.position
 
     def waypoints_cb(self, waypoints):
-        self.waypoints = waypoints
+        self.waypoints = waypoints.waypoints
+
+    def get_distance(self, p1, p2):
+        dx = p1.x - p2.x
+        dy = p1.y - p2.y
+        return math.sqrt(math.pow(dx, 2) + math.pow(dy, 2))
 
     def traffic_cb(self, msg):
         self.lights = msg.lights
 
+        if self.pose is None:
+            return
+
+        # find the closest traffic light to the car
+        min_dist = 1000000.0
         tl =[]
+        self.closest_light = None
+        # rospy.loginfo('--------------------------------')
+        # rospy.loginfo('car position: ' + str(self.pose.x) + ', ' + str(self.pose.y))
         for light in self.lights:
+            dist = self.get_distance(self.pose, light.pose.pose.position)
+            if dist < min_dist:
+                min_dist = dist
+                self.closest_light = light.pose.pose.position
             # rospy.loginfo('light position: ' + str(light.pose.pose.position.x) + ', ' + str(light.pose.pose.position.y))
             tl.append(light.pose.pose.position)
+        # rospy.loginfo('closest light position: ' + str(self.closest_light.x) + ', ' + str(self.closest_light.y))
+
+        self.min_dist_to_light = min_dist
 
         # transform msg to x, y, z array
         self.lights = tl
@@ -91,12 +115,12 @@ class TLDetector(object):
 
         if not hasattr(self, 'images_received_counter'):
             return
-        self.images_received_counter = self.images_received_counter + 1
 
         self.camera_image = msg
 
         # performs throttling emperically, otherwise PID fails due to high load
         if self.images_received_counter < CHECK_CAMERA_EVERY_N_FRAMES:
+            self.images_received_counter = self.images_received_counter + 1
             return
         else:
             self.images_received_counter = 0
@@ -139,7 +163,16 @@ class TLDetector(object):
             int: index of the closest waypoint in self.waypoints
         """
         #TODO implement
-        return 0
+        min_dist = 1000000.0
+        min_index = -1
+
+        for I in range(1, len(self.waypoints)):
+            dist = self.get_distance(pose, self.waypoints[I].pose.pose.position)
+            if dist < min_dist:
+                min_dist = dist
+                min_index = I
+
+        return min_index
 
     def get_light_state(self, light):
         """Determines the current color of the traffic light
@@ -158,16 +191,30 @@ class TLDetector(object):
         return self.light_classifier.get_classification(cv_image)
 
     def get_closest_light(self):
-        distance = 1000000.0
-        the_light = None
 
-        for light in self.lights:
-            d = math.sqrt(math.pow(self.pose.x - light.x, 2) + math.pow(self.pose.y - light.y, 2))
-            if d < distance:
-                distance = d
-                the_light = light
+        # since we know the closest light position in world coordinates
+        # we need only to find the closest's waypoint index
 
-        return distance, the_light
+        if self.closest_light is None:
+            return 1000000.0, None, -1
+
+        # find the index of waypoint closest to the closest traffic light
+        index = self.get_closest_waypoint(self.closest_light)
+
+        # the stop line is STOP_N_WAYPOINTS_BEFORE_TRAFFIC_LIGHT waypoint steps
+        # before the predicted traffic light waypoint index
+        return self.min_dist_to_light, self.closest_light, index - STOP_N_WAYPOINTS_BEFORE_TRAFFIC_LIGHT
+
+        # distance = 1000000.0
+        # the_light = None
+        #
+        # for light in self.lights:
+        #     d = math.sqrt(math.pow(self.pose.x - light.x, 2) + math.pow(self.pose.y - light.y, 2))
+        #     if d < distance:
+        #         distance = d
+        #         the_light = light
+        #
+        # return distance, the_light
 
     def process_traffic_lights(self):
         """Finds closest visible traffic light, if one exists, and determines its
@@ -184,7 +231,9 @@ class TLDetector(object):
         #     car_position = self.get_closest_waypoint(self.pose.pose)
 
         #TODO find the closest visible traffic light (if one exists)
-        distance, light = self.get_closest_light()
+        distance, light, waypoint_index = self.get_closest_light()
+        # rospy.loginfo('closest light: ' + str(light.x) + ', ' + str(light.y) +
+        #               ', distance: ' + str(distance) + ', wp stop line index: ' + str(waypoint_index))
 
         if distance > TRAFFIC_LIGHT_DISTANCE_THRESHOLD:
             return -1, TrafficLight.UNKNOWN
@@ -204,9 +253,13 @@ class TLDetector(object):
 
         if light is not None and self.is_closing is True:
             state = self.get_light_state(light)
-            rospy.loginfo('Traffic light recognized:' + str(state))
-            return -1, state
-        self.waypoints = None
+            # rospy.loginfo('Traffic light recognized:' + str(state))
+
+            rospy.loginfo('Light:' + str(state) +
+                            ', Position: ' + str(light.x) + ', ' + str(light.y) +
+                            ', Distance: ' + str(distance) +
+                            ', Wp Index: ' + str(waypoint_index))
+            return waypoint_index, state
         return -1, TrafficLight.UNKNOWN
 
 if __name__ == '__main__':
